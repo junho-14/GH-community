@@ -53,29 +53,26 @@ export function AuthProvider({ children }) {
   }, [session]);
 
   const signUp = async ({ email, password, nickname, profileImageFile }) => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { nickname } },
+    });
     if (error) throw error;
 
+    // 이메일 인증이 필요한 경우 세션이 없어 스토리지 업로드가 불가능하므로,
+    // 세션이 즉시 발급된 경우에만 프로필 이미지를 업로드한다. (프로필 행 자체는 DB 트리거가 생성)
     const userId = data.user?.id;
-    if (!userId) return data;
-
-    let profileImageUrl = null;
-    if (profileImageFile) {
+    if (userId && data.session && profileImageFile) {
       const filePath = `profiles/${userId}-${Date.now()}-${profileImageFile.name}`;
       const { error: uploadError } = await supabase.storage
         .from('gh-images')
         .upload(filePath, profileImageFile);
       if (!uploadError) {
-        profileImageUrl = supabase.storage.from('gh-images').getPublicUrl(filePath).data.publicUrl;
+        const profileImageUrl = supabase.storage.from('gh-images').getPublicUrl(filePath).data.publicUrl;
+        await supabase.from('gh_users').update({ profile_image_url: profileImageUrl }).eq('id', userId);
       }
     }
-
-    const { error: profileError } = await supabase.from('gh_users').insert({
-      id: userId,
-      nickname,
-      profile_image_url: profileImageUrl,
-    });
-    if (profileError) throw profileError;
 
     return data;
   };
